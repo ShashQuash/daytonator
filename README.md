@@ -1,91 +1,99 @@
-# Detonator — pre-event scaffold
+# DayTonator
 
-Fork-and-bait differential detonation for the AI software supply chain.
-Snapshot a clean Daytona sandbox once, fork it into several *baited* environments,
-and let the model judge the cross-fork behavioural differential. Malware that hides
-on a clean run reveals itself in the fork that baits it.
+**Fork-and-bait differential detonation for the AI software supply chain.**
 
-This scaffold **already runs end to end offline** (no Daytona, no API key) and the
-three demo packages classify correctly. Your job on the day is to swap the local
-backend for Daytona forking and build the UI on top.
+AI coding agents hallucinate package names; attackers register those names with malware
+(slopsquatting). DayTonator detonates a suspicious package inside isolated **Daytona**
+sandboxes, **forks one snapshot into several baited environments**, and lets a model judge
+what the package does across the forks. Malware that hides on a clean run reveals itself in
+the fork that baits it.
 
-## Floor and ceiling
-- **Floor (15:30 freeze target):** one package → control + AWS fork → strace capture
-  → verdict. That alone is a complete, winning demo.
-- **Ceiling (only on top of a working floor):** all five baits, AI-written
-  provocation harnesses, and iterative re-forking when inconclusive.
-Never sacrifice the floor for the ceiling.
+Built on **Daytona** (sandbox forking), **Featherless** (the model that writes the verdict),
+and **Lovable** (the console UI).
 
-## Setup
+---
+
+## How it works
+
+1. **Snapshot** one clean Daytona sandbox — a single, identical starting point.
+2. **Fork** it into several environments, each with one planted *bait*: control (nothing),
+   AWS creds, an SSH key, a production-looking env.
+3. **Detonate** the package in every fork while `strace` records file, network, and process
+   activity.
+4. **Differential** — behaviour that appears in a baited fork but not in control was provably
+   triggered by that bait. Evasive malware can't hide.
+5. **A model explains** the verdict (safe / suspicious / malicious) in plain English.
+
+---
+
+## Quick start
+
 ```bash
-pip install -r requirements.txt          # daytona-sdk, anthropic
-cp .env.example .env                      # fill in keys
-# strace must be present locally for the LocalRunner: apt-get install -y strace
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env            # fill in your keys (see below)
 ```
 
-## Run it offline (do this tonight)
-```bash
-python tests/smoke_test.py                # all three demo packages should PASS
-python -m detonator.cli --local demo_packages/evasive_stealer \
-    --import-name evasive_stealer --full  # watch the star: silent on control, fires on AWS
+`.env`:
 ```
-With no `ANTHROPIC_API_KEY`, verdicts come from a transparent heuristic. Add the
-key and the model writes the verdict + explanation instead (`via: ai`).
-
-## Run it on Daytona (the day)
-```bash
-python -m detonator.cli requests --backend daytona            # real PyPI package
-python -m detonator.cli evasive-pkg --backend daytona --full  # your demo
+DAYTONA_API_KEY=...             # from app.daytona.io
+DAYTONA_TARGET=eu
+BACKEND=daytona                 # or "local" to run offline without Daytona
+FEATHERLESS_API_KEY=...         # free open-source models; falls back to a heuristic if unset
+FEATHERLESS_MODEL=Qwen/Qwen2.5-72B-Instruct
 ```
-`DaytonaRunner` is written against the current `daytona-sdk`: `snapshot.create`,
-`create(CreateSandboxFromSnapshotParams(snapshot=..., env_vars=...))`,
-`process.exec`, `fs`. Three calls are marked `CONFIRM-ON-DAY` in `runner.py`
-(file upload arg order, home-dir getter, network allow-list) — verify them against
-live docs first thing, they're the only Daytona-specific risk.
 
-## The UI data contract
-`tests/sample_output_evasive.json` is the exact JSON the engine emits
-(`--json`). Hand it to the designer/frontend so the console renders real shape:
-`{ package, verdict{label,score,explanation,triggered_by,evidence,via}, traces[] }`.
-Each trace has `bait`, `events[]` ({kind, detail}), `exit_code`. The mockup already
-maps to this: per-package status, per-fork events, the highlighted differential,
-verdict + explanation.
+### Run from the command line
+```bash
+python -m detonator.cli evasive-stealer --backend daytona --full
+# -> MALICIOUS (95/100, via featherless), triggered by the AWS fork
+```
 
-## File map
+### Run the web console
+```bash
+uvicorn server:app --reload --port 8000   # open http://localhost:8000
+```
+
+### Run offline (no Daytona, no keys)
+```bash
+python tests/smoke_test.py    # all three demo packages classify correctly
+```
+Offline uses a local strace runner and a transparent heuristic verdict, so the whole pipeline
+works with zero credentials for development.
+
+---
+
+## Architecture
+
 ```
 detonator/
-  baits.py      bait environments (control/ssh/aws/prod/clock) + fake canaries
-  trace.py      Trace model + strace parser (normalized paths)
-  harness.py    in-sandbox provocation script + strace command
-  runner.py     LocalRunner (offline) + DaytonaRunner (snapshot+fork)   <- spine
-  analyze.py    cross-fork differential + AI verdict + AI provocation + fallback
-  pipeline.py   package -> fork baits -> capture -> verdict
+  baits.py      bait environments (control / ssh / aws / prod / clock) + fake canaries
+  trace.py      Trace model + strace parser
+  harness.py    in-sandbox provocation + strace command
+  runner.py     LocalRunner (offline) and DaytonaRunner (snapshot + fork)
+  analyze.py    cross-fork differential + model verdict (Featherless/Anthropic) + heuristic fallback
+  pipeline.py   package -> fork across baits -> capture -> verdict
   cli.py        command-line entrypoint
-demo_packages/  benign / canary_stealer / evasive_stealer (test fixtures)
-tests/          smoke_test.py + sample_output_evasive.json (UI contract)
+server.py       FastAPI backend + web console (/api/detonate)
+web/index.html  built-in console (a Lovable UI can also call /api/detonate)
+demo_packages/  benign / canary_stealer / evasive_stealer (safe test fixtures)
+tests/          smoke_test.py + sample_output_evasive.json (the UI data contract)
 ```
 
-## Start sequence
+**LLM backends:** the verdict tries Featherless first, then Anthropic, then a built-in
+heuristic — so it never fails, and the explanation is model-written when a key is present.
 
-**Tonight (everyone):**
-1. `pip install -r requirements.txt`, get the smoke test passing on your machine.
-2. Create Daytona accounts + keys, **set up billing** (extra $100 + parallel headroom),
-   run the SDK hello-world so you know auth works.
-3. Sushi + coder 2: read `runner.py`, resolve the three `CONFIRM-ON-DAY` calls against
-   live Daytona docs, get one real package detonating on `--backend daytona`.
-4. Designer: build the console from the mockup against `sample_output_evasive.json`.
-5. QA: confirm the three demo packages behave (especially evasive firing only on AWS),
-   and draft the demo script.
-
-**On the day:**
-- 11:00–12:00 — Sushi: real Daytona snapshot + fork working (control + AWS). Coder 2:
-  wire AI verdict (`ANTHROPIC_API_KEY`). Designer: console on live data. QA: test harness.
-- 12:45–14:30 — merge to a working floor end to end; one clean run of the evasive demo.
-- 14:30–15:30 — add baits / AI provocation if ahead; fix breakages.
-- 15:30 — FREEZE. Rehearse twice, record the backup video.
+---
 
 ## Safety note
-The demo packages are **test fixtures, not malware**. They read only fake planted
-canary values and "exfiltrate" to unroutable RFC-5737 documentation IPs
-(203.0.113.x). They reach nothing and steal nothing real; their only purpose is to
-make the detector fire on demand.
+
+The demo packages are **test fixtures, not malware**. They read only fake planted canary
+values and "exfiltrate" to unroutable RFC-5737 documentation IPs (203.0.113.x). They reach
+nothing and steal nothing real; their only purpose is to make the detector fire on demand.
+
+## Roadmap
+
+microVM-grade isolation for genuinely hostile code (today's sandboxes share a kernel, so this
+is behavioural early warning, not bulletproof containment); more baits; an agentic mode where
+the model writes custom provocations and re-forks until confident; and a registry-middleware
+mode that gates an agent's `pip install` in real time.
