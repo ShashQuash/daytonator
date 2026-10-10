@@ -11,6 +11,16 @@ the fork that baits it.
 Built on **Daytona** (sandbox forking), **Featherless** (the model that writes the verdict),
 and **Lovable** (the console UI).
 
+## Built at AI Hackday Berlin
+
+A 5-hour team build at AI Hackday Berlin (26 June 2026), organised by Daytona and hosted at Factory Berlin. We didn't place, but the demo ran live during the event.
+
+| Team member | What they did |
+|---|---|
+| Shrish Arunesh | Assembled the code with AI assistance, set up the Daytona sandboxes, the strace tracing and the LLM verdict, and ran the backend from a laptop (Kali on WSL, exposed through a Cloudflare tunnel) so the Lovable site could call it live |
+| [Yu Chuan Oh](https://www.linkedin.com/in/yu-chuan-oh-169a3419b/) | Build & Testing |
+| [Ran Mo](https://www.linkedin.com/in/ran-mo-design/) | Website design and the presentation |
+
 ---
 
 ## How it works
